@@ -5,9 +5,10 @@ import { canViewRequest } from '@/lib/permissions'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const token =
       request.cookies.get('sb-access-token')?.value ||
       request.headers.get('Authorization')?.replace('Bearer ', '')
@@ -27,7 +28,7 @@ export async function GET(
     const { data: hcRequest, error: reqError } = await db
       .from('hc_requests')
       .select('*')
-      .eq('request_id', params.id)
+      .eq('request_id', id)
       .single()
 
     if (reqError || !hcRequest) {
@@ -42,7 +43,7 @@ export async function GET(
     const { data: logs, error: logsError } = await db
       .from('hc_logs')
       .select('*, actor:staff!hc_logs_action_by_fkey(name_surname, nickname)')
-      .eq('request_id', params.id)
+      .eq('request_id', id)
       .order('action_date', { ascending: false })
 
     if (logsError) {

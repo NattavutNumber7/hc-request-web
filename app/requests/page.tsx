@@ -5,10 +5,10 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/context'
 import { canViewAllRequests } from '@/lib/permissions'
 import { supabase } from '@/lib/supabase'
-import { HCRequest, Status, STATUS_LIST } from '@/types'
+import { HCRequest, Status } from '@/types'
 import Layout from '@/components/layout/Layout'
 import RequestTable from '@/components/requests/RequestTable'
-import FilterBar from '@/components/ui/FilterBar'
+import FilterBar, { FilterValues } from '@/components/ui/FilterBar'
 
 interface RequestsResponse {
   data: HCRequest[]
@@ -28,12 +28,28 @@ export default function RequestsPage() {
   const [page, setPage] = useState(1)
   const [fetching, setFetching] = useState(true)
   const [error, setError] = useState('')
-
-  // Filters
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [departmentFilter, setDepartmentFilter] = useState<string>('')
-  const [searchFilter, setSearchFilter] = useState<string>('')
   const [departments, setDepartments] = useState<string[]>([])
+
+  const [filters, setFilters] = useState<FilterValues>({
+    status: '' as Status | '',
+    department: '',
+    search: '',
+  })
+
+  // Read initial filters from URL on mount (client-side only)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get('status')
+    const dept = params.get('department')
+    const search = params.get('search')
+    if (status || dept || search) {
+      setFilters({
+        status: (status as Status) || '',
+        department: dept || '',
+        search: search || '',
+      })
+    }
+  }, [])
 
   useEffect(() => {
     if (!loading && !user) {
@@ -69,9 +85,9 @@ export default function RequestsPage() {
       const params = new URLSearchParams()
       params.set('page', String(page))
       params.set('limit', '20')
-      if (statusFilter) params.set('status', statusFilter)
-      if (departmentFilter) params.set('department', departmentFilter)
-      if (searchFilter) params.set('search', searchFilter)
+      if (filters.status) params.set('status', filters.status)
+      if (filters.department) params.set('department', filters.department)
+      if (filters.search) params.set('search', filters.search)
 
       const res = await fetch(`/api/requests?${params.toString()}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -90,16 +106,17 @@ export default function RequestsPage() {
     } finally {
       setFetching(false)
     }
-  }, [user, page, statusFilter, departmentFilter, searchFilter])
+  }, [user, page, filters])
 
   useEffect(() => {
     fetchRequests()
   }, [fetchRequests])
 
   // Reset page when filters change
-  useEffect(() => {
+  const handleFilterChange = (newFilters: FilterValues) => {
+    setFilters(newFilters)
     setPage(1)
-  }, [statusFilter, departmentFilter, searchFilter])
+  }
 
   if (loading) {
     return (
@@ -138,15 +155,9 @@ export default function RequestsPage() {
 
         {/* Filters */}
         <FilterBar
-          statusFilter={statusFilter}
-          onStatusChange={setStatusFilter}
-          departmentFilter={departmentFilter}
-          onDepartmentChange={setDepartmentFilter}
-          searchFilter={searchFilter}
-          onSearchChange={setSearchFilter}
-          departments={departments}
-          statusList={STATUS_LIST}
-          showDepartment={isAdmin}
+          filters={filters}
+          departments={isAdmin ? departments : []}
+          onChange={handleFilterChange}
         />
 
         {/* Error */}
@@ -171,7 +182,10 @@ export default function RequestsPage() {
             <p className="mt-4 text-gray-500">No requests found</p>
           </div>
         ) : (
-          <RequestTable requests={requests} user={user} />
+          <RequestTable
+            requests={requests}
+            onRowClick={(req) => router.push(`/requests/${req.request_id}`)}
+          />
         )}
 
         {/* Pagination */}

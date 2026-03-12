@@ -1,27 +1,30 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import FileUpload from '@/components/ui/FileUpload'
 import { JOB_GRADES } from '@/types'
+import { supabase } from '@/lib/supabase'
 import type { HCRequest, Position, Staff, User, RequestType } from '@/types'
 
 interface RequestFormProps {
   initialData?: Partial<HCRequest>
   departments: string[]
   positions: Position[]
-  staffList: Staff[]
   user: User
-  onSubmit: (data: FormData) => Promise<void>
+  onDepartmentChange?: (dept: string) => void
+  onSubmit: (data: Record<string, any>) => Promise<void>
+  submitting?: boolean
 }
 
 export default function RequestForm({
   initialData,
   departments,
   positions,
-  staffList,
   user,
+  onDepartmentChange,
   onSubmit,
+  submitting = false,
 }: RequestFormProps) {
   const isCeo = user.role === 'ceo'
   const isEdit = !!initialData?.id
@@ -40,9 +43,41 @@ export default function RequestForm({
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  // Filter positions / staff by department
+  // Fetch staff for "replace who" dropdown
+  const [staffList, setStaffList] = useState<Staff[]>([])
+  useEffect(() => {
+    if (requestType !== 'Replacement' || !department) {
+      setStaffList([])
+      return
+    }
+    const fetchStaff = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token) return
+        const res = await fetch(
+          `/api/staff?department=${encodeURIComponent(department)}`,
+          { headers: { Authorization: `Bearer ${session.access_token}` } }
+        )
+        if (res.ok) {
+          const json = await res.json()
+          setStaffList(json.data || [])
+        }
+      } catch {
+        // ignore
+      }
+    }
+    fetchStaff()
+  }, [department, requestType])
+
+  // Filter positions by department
   const filteredPositions = positions.filter((p) => p.department === department)
-  const filteredStaff = staffList.filter((s) => s.department === department)
+
+  const handleDepartmentChange = (dept: string) => {
+    setDepartment(dept)
+    setPositionSelect('')
+    setReplaceWho('')
+    onDepartmentChange?.(dept)
+  }
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {}
@@ -67,29 +102,48 @@ export default function RequestForm({
 
     setLoading(true)
     try {
-      const fd = new FormData()
-      fd.append('request_type', requestType)
-      fd.append('department', department)
-      fd.append('job_grade', jobGrade)
-      fd.append('requirements_comment', comment)
-
-      if (requestType === 'Replacement') {
-        fd.append('position_select', positionSelect)
-        fd.append('replace_who', replaceWho)
-        if (lastWorkingDate) fd.append('last_working_date', lastWorkingDate)
-      } else {
-        fd.append('position_new', positionNew)
+      const payload: Record<string, any> = {
+        request_type: requestType,
+        department,
+        job_grade: jobGrade,
+        requirements_comment: comment,
       }
 
-      if (jdFile) fd.append('jd_file', jdFile)
+      if (requestType === 'Replacement') {
+        payload.position_select = positionSelect
+        payload.replace_who = replaceWho
+        if (lastWorkingDate) payload.last_working_date = lastWorkingDate
+      } else {
+        payload.position_new = positionNew
+      }
 
-      await onSubmit(fd)
+      // Upload JD file if provided
+      if (jdFile) {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.access_token) {
+          const fd = new FormData()
+          fd.append('file', jdFile)
+          const uploadRes = await fetch('/api/upload/jd', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            body: fd,
+          })
+          if (uploadRes.ok) {
+            const uploadJson = await uploadRes.json()
+            payload.jd_file_url = uploadJson.url
+          }
+        }
+      }
+
+      await onSubmit(payload)
     } catch {
       // handled by parent
     } finally {
       setLoading(false)
     }
   }
+
+  const isSubmitting = loading || submitting
 
   const inputClass =
     'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#008065]/30 focus:border-[#008065]'
@@ -131,7 +185,7 @@ export default function RequestForm({
         {isCeo ? (
           <select
             value={department}
-            onChange={(e) => setDepartment(e.target.value)}
+            onChange={(e) => handleDepartmentChange(e.target.value)}
             className={inputClass}
           >
             <option value="">เลือกแผนก</option>
@@ -182,7 +236,7 @@ export default function RequestForm({
               className={inputClass}
             >
               <option value="">เลือกพนักงาน</option>
-              {filteredStaff.map((s) => (
+              {staffList.map((s) => (
                 <option key={s.id} value={s.name_surname}>
                   {s.full_name ?? s.name_surname}
                   {s.nickname ? ` (${s.nickname})` : ''}
@@ -266,12 +320,12 @@ export default function RequestForm({
       <div className="pt-4">
         <button
           type="submit"
-          disabled={loading}
+          disabled={isSubmitting}
           className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-medium text-white
             bg-[#008065] hover:bg-[#006a54] rounded-lg transition-colors
             disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+          {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
           {isEdit ? 'บันทึกการแก้ไข' : 'ส่งคำขอ'}
         </button>
       </div>

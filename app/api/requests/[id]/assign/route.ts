@@ -7,9 +7,10 @@ import { notifySlack, assignedMessage } from '@/lib/slack'
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const token =
       request.cookies.get('sb-access-token')?.value ||
       request.headers.get('Authorization')?.replace('Bearer ', '')
@@ -29,7 +30,7 @@ export async function POST(
     const { data: existing, error: fetchError } = await db
       .from('hc_requests')
       .select('*')
-      .eq('request_id', params.id)
+      .eq('request_id', id)
       .single()
 
     if (fetchError || !existing) {
@@ -52,7 +53,7 @@ export async function POST(
         status: 'Assigned',
         updated_at: now,
       })
-      .eq('request_id', params.id)
+      .eq('request_id', id)
       .select()
       .single()
 
@@ -63,7 +64,7 @@ export async function POST(
 
     // Log action
     await logAction({
-      requestId: params.id,
+      requestId: id,
       action: 'Assigned',
       actionBy: user.email,
       fromStatus: existing.status,
@@ -76,7 +77,7 @@ export async function POST(
         ? existing.position_new
         : existing.position_select
     const message = assignedMessage({
-      requestId: params.id,
+      requestId: id,
       position: positionDisplay || '-',
       assignedTo: user.name_surname,
     })

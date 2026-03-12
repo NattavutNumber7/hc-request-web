@@ -21,9 +21,10 @@ function getToken(request: NextRequest): string | undefined {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const token = getToken(request)
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -40,7 +41,7 @@ export async function GET(
       .select(
         '*, manager:staff!hc_requests_manager_email_fkey(name_surname, nickname), assignee:staff!hc_requests_assigned_to_fkey(name_surname, nickname)'
       )
-      .eq('request_id', params.id)
+      .eq('request_id', id)
       .single()
 
     if (error || !data) {
@@ -74,9 +75,10 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: requestId } = await params
     const token = getToken(request)
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -93,7 +95,7 @@ export async function PATCH(
     const { data: existing, error: fetchError } = await db
       .from('hc_requests')
       .select('*')
-      .eq('request_id', params.id)
+      .eq('request_id', requestId)
       .single()
 
     if (fetchError || !existing) {
@@ -144,7 +146,7 @@ export async function PATCH(
     const { data: updated, error: updateError } = await db
       .from('hc_requests')
       .update(updateData)
-      .eq('request_id', params.id)
+      .eq('request_id', requestId)
       .select()
       .single()
 
@@ -156,7 +158,7 @@ export async function PATCH(
     // If status changed, log and notify
     if (isStatusChange) {
       await logAction({
-        requestId: params.id,
+        requestId: requestId,
         action: `Status changed to ${body.status}`,
         actionBy: user.email,
         fromStatus: existing.status,
@@ -165,14 +167,14 @@ export async function PATCH(
       })
 
       const message = statusChangedMessage({
-        requestId: params.id,
+        requestId: requestId,
         fromStatus: existing.status,
         toStatus: body.status,
       })
       notifySlack(message).catch(console.error)
     } else {
       await logAction({
-        requestId: params.id,
+        requestId: requestId,
         action: 'Updated',
         actionBy: user.email,
         comment: body.comment,
@@ -188,9 +190,10 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: deleteId } = await params
     const token = getToken(request)
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -206,7 +209,7 @@ export async function DELETE(
     const { data: existing, error: fetchError } = await db
       .from('hc_requests')
       .select('*')
-      .eq('request_id', params.id)
+      .eq('request_id', deleteId)
       .single()
 
     if (fetchError || !existing) {
@@ -226,7 +229,7 @@ export async function DELETE(
         status: 'Cancelled',
         updated_at: new Date().toISOString(),
       })
-      .eq('request_id', params.id)
+      .eq('request_id', deleteId)
       .select()
       .single()
 
@@ -236,7 +239,7 @@ export async function DELETE(
     }
 
     await logAction({
-      requestId: params.id,
+      requestId: deleteId,
       action: 'Cancelled',
       actionBy: user.email,
       fromStatus: existing.status,
